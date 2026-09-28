@@ -1,0 +1,11 @@
+{
+  "name": "theater-showdown-outils",
+  "private": true,
+  "description": "Scripts de génération des assets de Theater Showdown",
+  "scripts": {
+    "sons": "node generer_sons.js"
+  },
+  "dependencies": {
+    "lamejs": "^1.2.1"
+  }
+}
