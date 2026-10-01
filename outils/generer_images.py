@@ -357,27 +357,58 @@ def fin(img, w, h, nom):
     sauver(img.resize((w, h), Image.LANCZOS), nom)
 
 
-def dessiner_croche(pc, x, y, taille, couleur):
-    """Une croche (note de musique) : tête ovale + hampe + crochet."""
-    k = taille / 36
-    tx, ty = x + 13 * k, y + 27 * k
-    R = (8 * k * S, 6 * k * S)
-    for col, ep in [(CONTOUR, 3), (couleur, 0)]:
-        e = ep * S * 0.6
-        pc.d.ellipse((tx * S - R[0] - e, ty * S - R[1] - e, tx * S + R[0] + e, ty * S + R[1] + e), fill=col)
-    pc.membre([(tx + 7 * k, ty - 1 * k), (tx + 7 * k, y + 4 * k)], couleur, 3 * k)
-    pc.membre([(tx + 7 * k, y + 4 * k), (tx + 15 * k, y + 11 * k), (tx + 13 * k, y + 19 * k)], couleur, 3 * k)
+def bezier(p0, p1, p2, pas=24):
+    """Points d'une courbe de Bézier quadratique (p1 = point de contrôle)."""
+    return [lerp(lerp(p0, p1, t / pas), lerp(p1, p2, t / pas), t / pas) for t in range(pas + 1)]
+
+
+def generer_croche(taille, nom):
+    """Croche nette (jauge du HUD, projectile) : remplissage blanc (teinté en jeu
+    par setTint) et contour sombre d'épaisseur constante autour de la silhouette.
+    Les coordonnées sont données pour une grille de 28x28, puis mises à l'échelle."""
+    k = 16 * taille / 28  # dessin en x16 puis réduction : bords bien lisses
+    ep = 1.5  # épaisseur du contour, en unités de la grille 28x28
+
+    # tête ovale inclinée
+    cx, cy, rx, ry, angle = 10.3, 20.6, 6.0, 4.3, math.radians(-22)
+
+    def tete(marge):
+        pts = []
+        for i in range(72):
+            a = i * 2 * math.pi / 72
+            x, y = (rx + marge) * math.cos(a), (ry + marge) * math.sin(a)
+            pts.append((cx + x * math.cos(angle) - y * math.sin(angle), cy + x * math.sin(angle) + y * math.cos(angle)))
+        return pts
+
+    # hampe collée au bord droit de la tête, crochet qui retombe vers la droite
+    hampe = [(14.3, 3.2), (16.4, 3.2), (16.4, 19.5), (14.3, 19.5)]
+    crochet = (bezier((16.4, 3.2), (17.2, 7.5), (21.6, 10.2))
+               + bezier((21.6, 10.2), (25.2, 13.2), (22.4, 18.6))
+               + bezier((22.4, 18.6), (23.2, 13.6), (16.4, 11.0)))
+
+    def calque(marge):
+        m = Image.new("L", (taille * 16, taille * 16), 0)
+        d = ImageDraw.Draw(m)
+        for forme in (tete(marge), hampe, crochet):
+            pts = [(x * k, y * k) for x, y in forme]
+            d.polygon(pts, fill=255)
+            if marge:  # dilatation : trait épais + disques aux sommets
+                d.line(pts + [pts[0]], fill=255, width=int(2 * marge * k), joint="curve")
+                r = marge * k
+                for x, y in pts:
+                    d.ellipse((x - r, y - r, x + r, y + r), fill=255)
+        return m
+
+    img = Image.new("RGBA", (taille * 16, taille * 16), (0, 0, 0, 0))
+    img.paste(CONTOUR, (0, 0), calque(ep))
+    img.paste((255, 255, 255, 255), (0, 0), calque(0))
+    sauver(img.resize((taille, taille), Image.LANCZOS), nom)
 
 
 def generer_objets():
     blanc = (255, 255, 255, 255)
-    img, pc = canevas(36, 36)
-    dessiner_croche(pc, 2, 1, 32, blanc)
-    fin(img, 36, 36, "note_projectile.png")
-
-    img, pc = canevas(28, 28)
-    dessiner_croche(pc, 1, 0, 26, blanc)
-    fin(img, 28, 28, "note_hud.png")
+    generer_croche(36, "note_projectile.png")
+    generer_croche(28, "note_hud.png")
 
     # étincelle d'impact
     img, pc = canevas(24, 24)
