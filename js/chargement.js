@@ -25,7 +25,8 @@ const IMAGES = [
   "fond_opera", "fond_piano", "fond_menu", "vignette_opera", "vignette_piano",
   "balcon", "lustre", "touche_blanche", "touche_noire", "pupitre",
   "note_projectile", "note_hud", "etincelle",
-  "objet_rose", "objet_partition", "objet_metronome", "objet_baguette"
+  "objet_rose", "objet_partition", "objet_metronome", "objet_baguette",
+  "fleche_retour"
 ];
 
 const OBJETS_PIXEL_ART = ["objet_rose", "objet_partition", "objet_metronome", "objet_baguette"];
@@ -56,6 +57,8 @@ export default class chargement extends Phaser.Scene {
     for (const cle of IMAGES) {
       this.load.image(cle, "./assets/images/" + cle + ".png");
     }
+    // image plein écran en JPEG pour rester sous 200 Ko
+    this.load.image("page_commandes", "./assets/images/page_commandes.jpg");
     for (const perso of PERSONNAGES) {
       this.load.spritesheet(perso.id, "./assets/images/perso_" + perso.id + ".png", {
         frameWidth: 120,
