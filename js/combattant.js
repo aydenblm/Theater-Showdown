@@ -63,8 +63,8 @@ export default class Combattant extends Phaser.Physics.Arcade.Sprite {
     // étiquette "J1"/"J2" au-dessus de la tête + icônes des bonus actifs
     const couleur = numero === 1 ? "#6cb8ff" : "#ff6c6c";
     this.etiquette = scene.add.text(x, y, "J" + numero, fct.style(20, couleur)).setOrigin(0.5).setDepth(11);
-    this.iconeVitesse = scene.add.image(x, y, "objet_metronome").setScale(0.5).setDepth(11).setVisible(false);
-    this.iconeForce = scene.add.image(x, y, "objet_baguette").setScale(0.5).setDepth(11).setVisible(false);
+    this.iconeVitesse = scene.add.image(x, y, "objet_metronome").setScale(2 / 3).setDepth(11).setVisible(false);
+    this.iconeForce = scene.add.image(x, y, "objet_baguette").setScale(2 / 3).setDepth(11).setVisible(false);
   }
 
   get sens() {

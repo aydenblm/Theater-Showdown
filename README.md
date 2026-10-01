@@ -23,6 +23,7 @@ puis ouvrir http://localhost:8080.
 | C | lancer une note de musique |
 | D | attaque spéciale (jauge de 5 notes pleine) |
 | E | esquive |
+| F (ou Échap) | pause |
 
 Clavier : J1 = flèches + `I O P K L M`, J2 = `Z Q S D` + `R T Y F G H`.
 
@@ -51,6 +52,7 @@ js/
   combat.js               combat, manches, objets, QTE de l'attaque spéciale, HUD
   combattant.js           classe Combattant (déplacements, coups, dégâts, jauge)
   victoire.js             écran de fin
+  pause.js                menu pause (lancé par-dessus le combat)
   donnees.js              personnages, arènes, objets (équilibrage)
   controles.js            touches de la borne
   fonctions.js            fonctions utilitaires partagées

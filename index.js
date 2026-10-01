@@ -6,6 +6,7 @@ import selection from "./js/selection.js";
 import selection_arene from "./js/selection_arene.js";
 import combat from "./js/combat.js";
 import victoire from "./js/victoire.js";
+import pause from "./js/pause.js";
 
 // configuration générale du jeu
 var config = {
@@ -28,7 +29,7 @@ var config = {
     }
   },
   // la première scène de la liste (chargement) est lancée automatiquement
-  scene: [chargement, menu, commandes, selection, selection_arene, combat, victoire],
+  scene: [chargement, menu, commandes, selection, selection_arene, combat, victoire, pause],
   baseURL: window.location.pathname.replace(/\/[^/]*$/, "")
 };
 

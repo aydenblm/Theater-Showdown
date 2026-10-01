@@ -28,6 +28,8 @@ const IMAGES = [
   "objet_rose", "objet_partition", "objet_metronome", "objet_baguette"
 ];
 
+const OBJETS_PIXEL_ART = ["objet_rose", "objet_partition", "objet_metronome", "objet_baguette"];
+
 const SONS = [
   "coup_leger", "coup_lourd", "garde", "tir", "saut", "esquive", "bonus", "ko", "gong",
   "qte_ok", "qte_rate", "menu_deplacer", "menu_valider", "note_piano", "jauge_pleine", "applaudissements",
@@ -66,6 +68,11 @@ export default class chargement extends Phaser.Scene {
   }
 
   create() {
+    // objets en pixel art : filtre "plus proche voisin" pour garder des pixels nets
+    for (const cle of OBJETS_PIXEL_ART) {
+      this.textures.get(cle).setFilter(Phaser.Textures.FilterMode.NEAREST);
+    }
+
     // une animation par état et par personnage : "maestro_repos", "diva_marche", ...
     for (const perso of PERSONNAGES) {
       for (const anim of ANIMATIONS) {

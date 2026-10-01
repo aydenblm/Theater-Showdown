@@ -86,9 +86,22 @@ export default class combat extends Phaser.Scene {
 
     this.creerHUD();
     this.lancerIntro();
+
+    // pause : Échap au clavier, ou bouton F d'un des deux joueurs sur la borne
+    this.toucheEchap = this.input.keyboard.addKey("ESC");
+    // pendant la pause, la scène ne reçoit plus le clavier : au retour on "relâche" toutes
+    // les touches, sinon une touche lâchée pendant la pause resterait enfoncée
+    // (on retire l'écouteur à la fermeture, car la scène est relancée à chaque manche)
+    const relacherTouches = () => this.input.keyboard.resetKeys();
+    this.events.on("resume", relacherTouches);
+    this.events.once("shutdown", () => this.events.off("resume", relacherTouches));
   }
 
   update(temps) {
+    if (this.demandePause()) {
+      this.ouvrirPause();
+      return;
+    }
     if (this.qte) {
       this.gererQTE();
     } else {
@@ -97,6 +110,21 @@ export default class combat extends Phaser.Scene {
       this.separerCombattants();
     }
     this.dessinerHUD(temps);
+  }
+
+  // à lire AVANT combattant.gerer(), qui "consomme" les appuis du bouton F
+  demandePause() {
+    if (this.enTransition) return false;
+    return Phaser.Input.Keyboard.JustDown(this.toucheEchap) ||
+      Phaser.Input.Keyboard.JustDown(this.j1.touches.F) ||
+      Phaser.Input.Keyboard.JustDown(this.j2.touches.F);
+  }
+
+  ouvrirPause() {
+    this.sound.pauseAll(); // musique et attaque spéciale en cours
+    fct.jouerSon(this, "menu_valider");
+    this.scene.launch("pause", this.donnees);
+    this.scene.pause();
   }
 
   // les combattants ne peuvent pas se traverser (sauf en sautant par-dessus)
@@ -450,6 +478,7 @@ export default class combat extends Phaser.Scene {
     this.add.text(1240, 14, this.j2.perso.nom, fct.style(24, "#ff6c6c")).setOrigin(1, 0).setDepth(101);
     this.texteChrono = this.add.text(640, 46, DUREE_MANCHE, fct.style(48, "#ffffff")).setOrigin(0.5).setDepth(101);
     this.add.text(640, 88, "Manche " + this.donnees.manche, fct.style(18, "#e8d8c0")).setOrigin(0.5).setDepth(101);
+    this.add.text(640, 706, "F / Échap : pause", fct.style(16, "#e8d8c0")).setOrigin(0.5).setAlpha(0.7).setDepth(101);
 
     // 5 notes de musique par joueur = jauge d'attaque spéciale
     this.notesHUD = this.combattants.map((c) => {

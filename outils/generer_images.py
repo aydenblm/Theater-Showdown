@@ -389,48 +389,154 @@ def generer_objets():
     pc.poly(pts, blanc, False)
     fin(img, 24, 24, "etincelle.png")
 
-    # rose : soin
-    img, pc = canevas(48, 48)
-    pc.membre([(24, 44), (24, 22)], (50, 140, 60, 255), 3)
-    pc.poly([(24, 34), (14, 28), (22, 30)], (60, 160, 70, 255))
-    pc.poly([(24, 38), (34, 32), (26, 34)], (60, 160, 70, 255))
-    for dx, dy in [(-6, -2), (6, -2), (0, -8), (-4, 5), (4, 5)]:
-        pc.disque((24 + dx, 17 + dy), 6, (210, 24, 50, 255))
-    pc.disque((24, 16), 4, (160, 10, 36, 255), False)
-    fin(img, 48, 48, "objet_rose.png")
+    generer_objets_pixel_art()
 
-    # partition : remplit la jauge
-    img, pc = canevas(48, 48)
-    pc.poly([(8, 4), (40, 4), (40, 44), (8, 44)], (250, 244, 225, 255))
-    for i in range(2):
-        for j in range(5):
-            y = 11 + i * 17 + j * 2.5
-            pc.trait((11, y), (37, y), (80, 70, 60, 255), 0.7)
-    for x, y in [(15, 15), (23, 12), (31, 17), (17, 31), (27, 28), (34, 33)]:
-        pc.disque((x, y), 2, (30, 24, 30, 255), False)
-        pc.trait((x + 1.8, y), (x + 1.8, y - 7), (30, 24, 30, 255), 0.8)
-    fin(img, 48, 48, "objet_partition.png")
 
-    # métronome : vitesse
-    img, pc = canevas(48, 48)
-    pc.poly([(16, 6), (32, 6), (40, 44), (8, 44)], (150, 90, 40, 255))
-    pc.poly([(18, 14), (30, 14), (34, 38), (14, 38)], (240, 220, 180, 255), False)
-    pc.membre([(24, 38), (32, 10)], (60, 60, 70, 255), 2)
-    pc.poly([(29, 20), (35, 20), (34, 25), (29, 25)], (200, 170, 60, 255))
-    fin(img, 48, 48, "objet_metronome.png")
+# ---------------------------------------------------------------------------
+# Objets bonus en pixel art : grille 16x16 agrandie x3 (48x48)
+# ---------------------------------------------------------------------------
+class Pixels:
+    """Petite grille de pixels : on dessine les formes, puis le contour est ajouté automatiquement."""
 
-    # baguette dorée : force
-    img, pc = canevas(48, 48)
-    pc.membre([(10, 40), (38, 10)], (250, 250, 250, 255), 3)
-    pc.membre([(8, 42), (15, 35)], (220, 170, 40, 255), 6)
-    for x, y, rr in [(38, 8, 4), (30, 6, 2.5), (42, 16, 2.5)]:
-        pts = []
-        for i in range(8):
-            a = i * math.pi / 4
-            q = rr if i % 2 == 0 else rr / 2.5
-            pts.append((x + q * math.cos(a), y + q * math.sin(a)))
-        pc.poly(pts, (255, 220, 80, 255), False)
-    fin(img, 48, 48, "objet_baguette.png")
+    def __init__(self, taille=16):
+        self.n = taille
+        self.g = [[None] * taille for _ in range(taille)]
+        self.reflets = []  # pixels ajoutés après le contour (étincelles)
+
+    def pixel(self, x, y, c):
+        if 0 <= x < self.n and 0 <= y < self.n:
+            self.g[y][x] = c
+
+    def rect(self, x0, y0, x1, y1, c):
+        for y in range(y0, y1 + 1):
+            for x in range(x0, x1 + 1):
+                self.pixel(x, y, c)
+
+    def ligne(self, x0, y0, x1, y1, c):
+        """Ligne de Bresenham."""
+        dx, dy = abs(x1 - x0), -abs(y1 - y0)
+        sx, sy = (1 if x0 < x1 else -1), (1 if y0 < y1 else -1)
+        err = dx + dy
+        while True:
+            self.pixel(x0, y0, c)
+            if x0 == x1 and y0 == y1:
+                break
+            e2 = 2 * err
+            if e2 >= dy:
+                err += dy
+                x0 += sx
+            if e2 <= dx:
+                err += dx
+                y0 += sy
+
+    def carte(self, lignes, palette):
+        for y, ligne in enumerate(lignes):
+            for x, car in enumerate(ligne):
+                if car in palette:
+                    self.pixel(x, y, palette[car])
+
+    def contour(self):
+        a_contourner = []
+        for y in range(self.n):
+            for x in range(self.n):
+                if self.g[y][x] is not None:
+                    continue
+                voisins = [(x + 1, y), (x - 1, y), (x, y + 1), (x, y - 1)]
+                if any(0 <= vx < self.n and 0 <= vy < self.n and self.g[vy][vx] not in (None, CONTOUR) for vx, vy in voisins):
+                    a_contourner.append((x, y))
+        for x, y in a_contourner:
+            self.g[y][x] = CONTOUR
+
+    def sauver(self, nom, zoom=3):
+        self.contour()
+        for x, y, c in self.reflets:
+            self.pixel(x, y, c)
+        img = Image.new("RGBA", (self.n, self.n), (0, 0, 0, 0))
+        for y in range(self.n):
+            for x in range(self.n):
+                if self.g[y][x] is not None:
+                    img.putpixel((x, y), self.g[y][x])
+        sauver(img.resize((self.n * zoom, self.n * zoom), Image.NEAREST), nom)
+
+
+def generer_objets_pixel_art():
+    # --- rose : soin ---
+    px = Pixels()
+    px.carte([
+        "................",
+        "................",
+        ".....HHRRR......",
+        "....HRrrrRR.....",
+        "....RrRRRrRr....",
+        "....RrRHrrRr....",
+        "....RRrrrRRr....",
+        ".....RRRRRr.....",
+        "......rGr.......",
+        "...LLL.G........",
+        "..LlLLLG..LL....",
+        "...LLl.GLLlL....",
+        ".......GLLL.....",
+        ".......G........",
+        ".......G........",
+        "................",
+    ], {"H": (255, 120, 130, 255), "R": (222, 38, 60, 255), "r": (150, 14, 40, 255),
+        "G": (52, 132, 56, 255), "L": (96, 196, 82, 255), "l": (52, 132, 56, 255)})
+    px.sauver("objet_rose.png")
+
+    # --- partition : remplit la jauge ---
+    px = Pixels()
+    papier, ombre, portee, encre = (250, 244, 225, 255), (214, 198, 166, 255), (150, 132, 112, 255), (34, 26, 34, 255)
+    px.rect(2, 1, 13, 14, papier)
+    px.rect(13, 1, 13, 14, ombre)
+    px.rect(2, 14, 13, 14, ombre)
+    for y in (4, 6, 8, 11, 13):
+        px.ligne(3, y, 12, y, portee)
+    # deux croches reliées par une ligature
+    px.rect(4, 7, 5, 8, encre)
+    px.ligne(5, 3, 5, 6, encre)
+    px.rect(9, 6, 10, 7, encre)
+    px.ligne(10, 3, 10, 5, encre)
+    px.rect(5, 2, 10, 2, encre)
+    # deux noires sur la seconde portée
+    px.rect(4, 12, 5, 13, encre)
+    px.ligne(5, 9, 5, 11, encre)
+    px.rect(9, 11, 10, 12, encre)
+    px.ligne(10, 9, 10, 10, encre)
+    px.sauver("objet_partition.png")
+
+    # --- métronome : vitesse ---
+    px = Pixels()
+    bois, clair, fonce, cadran = (168, 100, 46, 255), (206, 140, 72, 255), (104, 58, 26, 255), (240, 222, 182, 255)
+    px.rect(7, 1, 8, 1, fonce)
+    for y in range(2, 13):
+        demi = 1 + (y - 2) * 5 // 10
+        gauche, droite = 7 - demi, 8 + demi
+        px.rect(gauche, y, droite, y, bois)
+        px.pixel(gauche, y, clair)
+        px.pixel(droite, y, fonce)
+        if 4 <= y <= 11 and droite - gauche >= 5:
+            px.rect(gauche + 2, y, droite - 2, y, cadran)
+    px.rect(1, 13, 14, 14, fonce)
+    px.rect(2, 13, 13, 13, bois)
+    px.ligne(7, 11, 12, 1, (70, 70, 84, 255))  # balancier
+    px.rect(9, 6, 10, 7, (236, 192, 60, 255))  # poids doré
+    px.pixel(7, 11, (236, 192, 60, 255))
+    px.sauver("objet_metronome.png")
+
+    # --- baguette dorée : force ---
+    px = Pixels()
+    blanc, gris, or_, or_fonce = (252, 252, 252, 255), (196, 196, 210, 255), (236, 192, 60, 255), (170, 120, 30, 255)
+    px.ligne(5, 11, 12, 4, blanc)
+    px.ligne(5, 12, 12, 5, gris)
+    px.ligne(2, 12, 5, 9, or_)
+    px.ligne(2, 13, 5, 10, or_)
+    px.ligne(3, 13, 6, 10, or_fonce)
+    # étincelles (sans contour)
+    etoile = (255, 236, 120, 255)
+    for x, y in [(13, 1), (12, 2), (13, 2), (14, 2), (13, 3), (9, 1), (15, 6), (10, 4)]:
+        px.reflets.append((x, y, etoile))
+    px.reflets.append((13, 2, (255, 255, 255, 255)))
+    px.sauver("objet_baguette.png")
 
 
 # ---------------------------------------------------------------------------
