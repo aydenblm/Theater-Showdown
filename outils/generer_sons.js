@@ -1,7 +1,7 @@
 /*
  * Génère tous les sons et musiques de Theater Showdown en MP3.
  * Tout est synthétisé par ce script : les mélodies sont des œuvres du domaine
- * public (Beethoven, Wagner, Vivaldi, Rossini, Bach, Bizet, Grieg) réarrangées ici,
+ * public (Mozart, Tchaïkovski, Bizet, Grieg, Beethoven) réarrangées ici,
  * donc aucun problème de droits.
  *
  * Utilisation (depuis le dossier outils) :
@@ -184,57 +184,26 @@ function bruitages() {
 /* ------------------------------------------------------------------ */
 function speciales() {
   let b;
-  // Maestro : Beethoven, 5e symphonie
-  b = tampon(3.9);
-  const destin = [["G4", 1], ["G4", 1], ["G4", 1], ["Eb4", 6], ["R", 2], ["F4", 1], ["F4", 1], ["F4", 1], ["D4", 8]];
-  melodie(b, 0.05, 0.16, destin, "cordes", 0.35);
-  melodie(b, 0.05, 0.16, destin, "cordes", 0.3, -12);
-  melodie(b, 0.05, 0.16, destin, "cuivre", 0.12, -24);
-  exporter("special_maestro", b);
-
-  // Diva : Wagner, la Chevauchée des Walkyries
-  b = tampon(4.0);
-  const walkyries = [
-    ["F#4", 1], ["B4", 2], ["F#4", 1], ["B4", 1], ["D5", 3], ["B4", 3],
-    ["B4", 1], ["D5", 2], ["B4", 1], ["D5", 1], ["F#5", 3], ["D5", 3],
-    ["D5", 1], ["F#5", 2], ["D5", 1], ["F#5", 1], ["A5", 3], ["A4", 3],
+  // Doremi : Mozart, « Ah ! vous dirai-je, maman » (do do sol sol la la sol...)
+  b = tampon(3.8);
+  const maman = [
+    ["C5", 1], ["C5", 1], ["G5", 1], ["G5", 1], ["A5", 1], ["A5", 1], ["G5", 2],
+    ["F5", 1], ["F5", 1], ["E5", 1], ["E5", 1], ["D5", 1], ["D5", 1], ["C5", 2],
   ];
-  melodie(b, 0.05, 0.11, walkyries, "cuivre", 0.35);
-  melodie(b, 0.05, 0.11, walkyries, "cuivre", 0.25, -12);
-  for (let t = 0.05; t < 3.7; t += 0.055) note(b, t, 0.05, frequence("B2"), "cordes", 0.12);
-  exporter("special_diva", b);
+  melodie(b, 0.05, 0.22, maman, "piano", 0.45);
+  melodie(b, 0.05, 0.22, [["C3+G3", 2], ["E3+C4", 2], ["F3+C4", 2], ["E3+C4", 2], ["D3+B3", 2], ["C3+A3", 2], ["G2+F3", 2], ["C3+E3", 2]], "piano", 0.22);
+  exporter("special_doremi", b);
 
-  // Violaine : Vivaldi, le Printemps
-  b = tampon(3.6);
-  const printemps = [
-    ["E5", 1], ["G#5", 1], ["G#5", 1], ["G#5", 1], ["F#5", 0.5], ["E5", 0.5], ["B5", 3],
-    ["B5", 0.5], ["A5", 0.5], ["G#5", 1], ["G#5", 1], ["G#5", 1], ["F#5", 0.5], ["E5", 0.5], ["B5", 3],
+  // Symphanie : Tchaïkovski, Danse de la Fée Dragée (célesta)
+  b = tampon(3.8);
+  const feeDragee = [
+    ["G5", 1], ["E5", 1], ["G5", 1], ["F#5", 1], ["D#5", 2],
+    ["E5", 1], ["D5", 1], ["D5", 1], ["D5", 1], ["C#5", 1], ["C#5", 1], ["C#5", 1],
+    ["C5", 1], ["C5", 1], ["C5", 1], ["B4", 1], ["E5", 1], ["C5", 1], ["B4", 2],
   ];
-  melodie(b, 0.05, 0.2, printemps, "cordes", 0.4);
-  melodie(b, 0.05, 0.2, [["R", 1], ["E3+B3+E4", 4], ["R", 3], ["E3+G#3+B3", 4], ["R", 4]], "clavecin", 0.25);
-  exporter("special_violaine", b);
-
-  // Major Timbale : Rossini, ouverture de Guillaume Tell
-  b = tampon(3.9);
-  const galop = [
-    ["G4", 1], ["G4", 1], ["G4", 2], ["G4", 1], ["G4", 1], ["G4", 2], ["G4", 1], ["G4", 1], ["C5", 2], ["D5", 2], ["E5", 2],
-    ["G4", 1], ["G4", 1], ["G4", 2], ["G4", 1], ["G4", 1], ["G4", 2], ["G4", 1], ["C5", 1], ["E5", 2], ["D5", 2], ["B4", 2],
-    ["C5+E5+G5", 4],
-  ];
-  melodie(b, 0.05, 0.1, galop, "cuivre", 0.35);
-  for (let i = 0; i < 18; i++) { caisse(b, 0.05 + i * 0.2, 0.3); kick(b, 0.05 + i * 0.4, 0.5); }
-  exporter("special_timbale", b);
-
-  // Fantôme : Bach, Toccata et fugue en ré mineur
-  b = tampon(3.9);
-  const toccata = [
-    ["A5", 0.25], ["G5", 0.25], ["A5", 2.5], ["R", 0.4],
-    ["G5", 0.25], ["F5", 0.25], ["E5", 0.25], ["D5", 0.25], ["C#5", 1], ["D5+A4+F4+D4", 3.5],
-  ];
-  melodie(b, 0.05, 0.3, toccata, "orgue", 0.3);
-  melodie(b, 0.05, 0.3, toccata, "orgue", 0.25, -12);
-  note(b, 2.2, 1.4, frequence("D2"), "orgue", 0.35);
-  exporter("special_fantome", b);
+  melodie(b, 0.05, 0.16, feeDragee, "cloche", 0.45);
+  for (let i = 0; i < 11; i++) note(b, 0.05 + i * 0.32, 0.15, frequence(i % 2 ? "B2" : "E2"), "pizz", 0.35);
+  exporter("special_symphanie", b);
 }
 
 /* ------------------------------------------------------------------ */
@@ -332,4 +301,7 @@ function musiques() {
 
 bruitages();
 speciales();
-musiques();
+// Les musiques en boucle ne sont plus générées : elles sont remplacées par les vraies musiques de
+// l'équipe (assets/sons/musique_*.mp3). Décommenter cette ligne écraserait musique_menu, musique_opera
+// et musique_piano par les anciennes boucles de test.
+// musiques();

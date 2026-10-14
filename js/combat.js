@@ -1,5 +1,5 @@
 import * as fct from "./fonctions.js";
-import { trouverPerso, trouverArene, OBJETS } from "./donnees.js";
+import { trouverPerso, trouverArene, OBJETS } from "./reglages.js";
 import { creerTouches } from "./controles.js";
 import Combattant, { PV_MAX, ENERGIE_MAX, COUPS } from "./combattant.js";
 
@@ -10,7 +10,6 @@ import Combattant, { PV_MAX, ENERGIE_MAX, COUPS } from "./combattant.js";
 /** on relance alors la scène (scene.restart) pour la manche suivante.
 /***********************************************************************/
 
-const SOL_Y = 620; // hauteur du sol
 const DUREE_MANCHE = 60; // secondes
 const MANCHES_GAGNANTES = 2;
 const MANCHES_MAX = 5; // sécurité en cas d'égalités à répétition
@@ -31,6 +30,11 @@ const DUREE_QTE = 3500;
 // notes jouées par les touches du piano géant (gamme de do majeur)
 const GAMME = [0, 2, 4, 5, 7, 9, 11];
 
+// barre de vie (image 462x116) : zone rouge entre ces deux abscisses de l'image
+// (exportées : le HUD du mode solo utilise la même image)
+export const BARRE_DEBUT = 113;
+export const BARRE_FIN = 421;
+
 export default class combat extends Phaser.Scene {
   constructor() {
     super({ key: "combat" });
@@ -50,24 +54,37 @@ export default class combat extends Phaser.Scene {
     this.physics.world.setBounds(0, 0, 1280, 720);
     const arene = trouverArene(this.donnees.arene);
     fct.jouerMusique(this, arene.musique, 0.4);
+    this.solY = arene.sol; // hauteur du sol, propre à chaque décor
 
-    // groupes communs aux deux arènes
-    this.solides = []; // sol : on ne peut pas le traverser
+    // groupes communs à toutes les arènes
+    this.solides = []; // sol, caisses : on ne peut pas les traverser
     this.groupe_plateformes = this.physics.add.group({ allowGravity: false, immovable: true });
-    if (arene.id === "piano") this.construirePiano();
-    else this.construireOpera();
+    this.plateformesMobiles = []; // lustre, touches noires, pont de projecteurs
+    this.tempsPlateformes = 0;
+    switch (arene.id) {
+      case "piano":
+        this.construirePiano();
+        break;
+      case "coulisses":
+        this.construireCoulisses();
+        break;
+      default:
+        this.construireOpera();
+    }
 
     // les deux combattants
-    this.j1 = new Combattant(this, 320, 460, trouverPerso(this.donnees.j1), 1, creerTouches(this, 1));
-    this.j2 = new Combattant(this, 960, 460, trouverPerso(this.donnees.j2), 2, creerTouches(this, 2));
+    this.j1 = new Combattant(this, 320, this.solY - 160, trouverPerso(this.donnees.j1), 1, creerTouches(this, 1));
+    this.j2 = new Combattant(this, 960, this.solY - 160, trouverPerso(this.donnees.j2), 2, creerTouches(this, 2));
     this.j1.adversaire = this.j2;
     this.j2.adversaire = this.j1;
     this.j2.setFlipX(true);
     this.combattants = [this.j1, this.j2];
 
     this.physics.add.collider(this.combattants, this.solides, this.surLeSol, null, this);
-    // plateformes traversables par le dessous
-    this.physics.add.collider(this.combattants, this.groupe_plateformes, null, this.traverserParDessous, this);
+    // plateformes traversables par le dessous (et par le dessus avec joystick bas)
+    this.physics.add.collider(this.combattants, this.groupe_plateformes, this.poserSurPlateforme, this.traverserParDessous, this);
+    // à chaque pas de la physique : on déplace les plateformes mobiles et ce qui est posé dessus
+    this.physics.world.on("worldstep", this.pasDePhysique, this);
 
     // notes de musique lancées (projectiles)
     this.groupe_notes = this.physics.add.group({ allowGravity: false });
@@ -81,13 +98,13 @@ export default class combat extends Phaser.Scene {
     // objets bonus qui tombent du ciel
     this.groupe_objets = this.physics.add.group();
     this.physics.add.collider(this.groupe_objets, this.solides);
-    this.physics.add.collider(this.groupe_objets, this.groupe_plateformes);
+    this.physics.add.collider(this.groupe_objets, this.groupe_plateformes, this.poserSurPlateforme, null, this);
     this.combattants.forEach((c) => this.physics.add.overlap(c, this.groupe_objets, this.ramasser, null, this));
 
     this.creerHUD();
     this.lancerIntro();
 
-    // pause : Échap au clavier, ou bouton F d'un des deux joueurs sur la borne
+    // pause : bouton Start d'un des deux joueurs sur la borne, ou Échap au clavier
     this.toucheEchap = this.input.keyboard.addKey("ESC");
     // pendant la pause, la scène ne reçoit plus le clavier : au retour on "relâche" toutes
     // les touches, sinon une touche lâchée pendant la pause resterait enfoncée
@@ -112,12 +129,12 @@ export default class combat extends Phaser.Scene {
     this.dessinerHUD(temps);
   }
 
-  // à lire AVANT combattant.gerer(), qui "consomme" les appuis du bouton F
+  // à lire AVANT combattant.gerer(), qui "consomme" les appuis de toutes les touches
   demandePause() {
     if (this.enTransition) return false;
     return Phaser.Input.Keyboard.JustDown(this.toucheEchap) ||
-      Phaser.Input.Keyboard.JustDown(this.j1.touches.F) ||
-      Phaser.Input.Keyboard.JustDown(this.j2.touches.F);
+      Phaser.Input.Keyboard.JustDown(this.j1.touches.start) ||
+      Phaser.Input.Keyboard.JustDown(this.j2.touches.start);
   }
 
   ouvrirPause() {
@@ -141,50 +158,120 @@ export default class combat extends Phaser.Scene {
   /*********************************************************************/
   /** ARÈNES
   /*********************************************************************/
-  construireOpera() {
-    this.add.image(640, 360, "fond_opera");
-    // sol invisible (la scène en bois est dessinée dans le décor)
-    const sol = this.add.zone(640, SOL_Y + 50, 1280, 100);
+  // sol invisible : le plancher est dessiné dans le décor
+  creerSol() {
+    const sol = this.add.zone(640, this.solY + 50, 1280, 100);
     this.physics.add.existing(sol, true);
     this.solides.push(sol);
+  }
 
-    // deux balcons fixes
-    [200, 1080].forEach((x) => this.creerPlateforme(x, 470, "balcon", 14));
-
-    // le lustre monte et descend grâce à un tween
-    const lustre = this.creerPlateforme(640, 250, "lustre", 14);
-    this.tweens.add({ targets: lustre, y: 330, duration: 2600, ease: "Sine.easeInOut", yoyo: true, repeat: -1 });
+  construireOpera() {
+    this.add.image(640, 360, "fond_opera");
+    this.creerSol();
+    // deux balcons et une estrade en bois fixes
+    [190, 1090].forEach((x) => this.creerPlateforme(x, 480, "balcon", 12));
+    this.creerPlateforme(640, 530, "plateforme_bois", 14);
+    // le lustre monte et descend
+    this.creerPlateformeMobile(640, 280, 340, 2600, "lustre", 14);
   }
 
   construirePiano() {
     this.add.image(640, 360, "fond_piano");
-    // le sol est fait de 16 touches blanches : chacune joue sa note quand on marche dessus
-    this.touches_piano = this.physics.add.staticGroup();
+    // le sol est fait des 16 touches blanches du décor (80 px chacune) : des zones invisibles
+    // qui jouent leur note quand on marche dessus
     for (let i = 0; i < 16; i++) {
-      const touche = this.touches_piano.create(40 + i * 80, SOL_Y + 50, "touche_blanche");
+      const touche = this.add.zone(40 + i * 80, this.solY + 50, 80, 100);
+      this.physics.add.existing(touche, true);
       touche.numero = i;
+      // ombre affichée quand la touche est enfoncée
+      touche.ombre = this.add.rectangle(touche.x, this.solY + 50, 76, 100, 0x2a1840).setAlpha(0).setDepth(1);
+      this.solides.push(touche);
     }
-    this.solides.push(this.touches_piano);
 
     // deux touches noires flottantes qui montent et descendent en alternance
-    const noire1 = this.creerPlateforme(260, 470, "touche_noire", 16);
-    const noire2 = this.creerPlateforme(1020, 390, "touche_noire", 16);
-    this.tweens.add({ targets: noire1, y: 390, duration: 2200, ease: "Sine.easeInOut", yoyo: true, repeat: -1 });
-    this.tweens.add({ targets: noire2, y: 470, duration: 2200, ease: "Sine.easeInOut", yoyo: true, repeat: -1 });
-    this.creerPlateforme(640, 290, "pupitre", 16);
+    this.creerPlateformeMobile(150, 470, 390, 2200, "touche_noire", 16);
+    this.creerPlateformeMobile(1130, 390, 470, 2200, "touche_noire", 16);
+    // le rebord du pupitre dessiné dans le décor sert de plateforme (zone invisible)
+    const rebord = this.add.zone(640, 463, 780, 14);
+    this.groupe_plateformes.add(rebord);
   }
 
-  // plateforme dont seule la bande du haut (épaisseur "hauteurCorps") est solide
-  creerPlateforme(x, y, cle, hauteurCorps) {
+  construireCoulisses() {
+    this.add.image(640, 360, "fond_coulisses");
+    this.creerSol();
+    // deux caisses posées au sol : pleines, on peut monter dessus mais pas les traverser
+    [420, 860].forEach((x) => this.solides.push(this.physics.add.staticImage(x, this.solY - 40, "caisse_bois").setDepth(5)));
+    // flight cases de chaque côté et poutre suspendue au centre
+    [170, 1110].forEach((x) => this.creerPlateforme(x, 430, "flight_case", 16));
+    this.creerPlateforme(640, 450, "poutre_suspendue", 14, 28);
+    // le pont de projecteurs monte et descend
+    this.creerPlateformeMobile(640, 250, 310, 2400, "pont_lumiere", 14);
+  }
+
+  // plateforme dont seule une bande (épaisseur "hauteurCorps", à "decalage" px du haut
+  // de l'image) est solide
+  creerPlateforme(x, y, cle, hauteurCorps, decalage = 0) {
     const plateforme = this.groupe_plateformes.create(x, y, cle);
-    plateforme.body.setSize(plateforme.width, hauteurCorps, false).setOffset(0, 0);
+    plateforme.body.setSize(plateforme.width, hauteurCorps, false).setOffset(0, decalage);
     plateforme.setDepth(5);
     return plateforme;
   }
 
-  // processCallback : on ne collisionne que si le combattant arrive par le dessus
+  // Plateforme qui fait l'aller-retour entre yDepart et yArrivee (durée d'un trajet en ms).
+  // Elle n'est pas animée par un tween mais déplacée à chaque pas de la physique (pasDePhysique) :
+  // avec un tween, la plateforme et les combattants posés dessus n'avançaient pas au même
+  // rythme, et les combattants tremblaient.
+  creerPlateformeMobile(x, yDepart, yArrivee, duree, cle, hauteurCorps) {
+    const plateforme = this.creerPlateforme(x, yDepart, cle, hauteurCorps);
+    plateforme.body.moves = false; // c'est nous qui la déplaçons, pas la physique
+    plateforme.trajet = { depart: yDepart, arrivee: yArrivee, duree: duree };
+    this.plateformesMobiles.push(plateforme);
+    return plateforme;
+  }
+
+  // processCallback : on ne collisionne que si le combattant arrive par le dessus,
+  // et pas s'il est en train de descendre volontairement (joystick bas)
   traverserParDessous(combattant, plateforme) {
+    if (this.time.now < combattant.traverseeJusqua) return false;
     return combattant.body.velocity.y >= 0 && combattant.body.bottom <= plateforme.body.top + 16;
+  }
+
+  // callback de collision : on retient la plateforme sur laquelle l'objet (ou le combattant) est posé
+  poserSurPlateforme(objet, plateforme) {
+    if (objet.body.touching.down) objet.plateforme = plateforme;
+  }
+
+  // Appelée par la physique après chaque pas (événement "worldstep"), delta en secondes
+  pasDePhysique(delta) {
+    // 1. les plateformes mobiles avancent (aller-retour "en douceur", comme Sine.easeInOut)
+    this.tempsPlateformes += delta * 1000;
+    for (const plateforme of this.plateformesMobiles) {
+      const trajet = plateforme.trajet;
+      const avancement = (1 - Math.cos((Math.PI * this.tempsPlateformes) / trajet.duree)) / 2;
+      const y = trajet.depart + (trajet.arrivee - trajet.depart) * avancement;
+      plateforme.body.y += y - plateforme.y;
+      plateforme.y = y;
+    }
+    // 2. ce qui est posé dessus suit le mouvement
+    this.combattants.forEach((combattant) => this.suivrePlateforme(combattant));
+    this.groupe_objets.getChildren().forEach((objet) => this.suivrePlateforme(objet));
+  }
+
+  // garde l'objet collé sur sa plateforme tant qu'il ne saute pas et ne la quitte pas
+  suivrePlateforme(objet) {
+    const plateforme = objet.plateforme;
+    if (!plateforme) return;
+    const corps = objet.body;
+    const dessus = plateforme.body.top;
+    const toujoursDessus = corps.right > plateforme.body.left && corps.left < plateforme.body.right &&
+      corps.velocity.y >= 0 && Math.abs(corps.bottom - dessus) <= 12;
+    if (!toujoursDessus) {
+      objet.plateforme = null;
+      return;
+    }
+    corps.y = dessus - corps.height;
+    corps.velocity.y = 0;
+    corps.blocked.down = true; // considéré "au sol" jusqu'au prochain pas
   }
 
   // appelée à chaque collision avec le sol : sur le piano, la touche foulée joue sa note
@@ -195,30 +282,39 @@ export default class combat extends Phaser.Scene {
     combattant.derniereTouchePiano = touche;
     const demiTons = GAMME[touche.numero % 7] + 12 * Math.floor(touche.numero / 7);
     this.sound.play("note_piano", { volume: 0.35, rate: Math.pow(2, demiTons / 12) });
-    // la touche s'enfonce (seulement l'image, le corps physique statique ne bouge pas)
-    this.tweens.killTweensOf(touche);
-    touche.y = SOL_Y + 50;
-    this.tweens.add({ targets: touche, y: SOL_Y + 57, duration: 70, yoyo: true });
+    // la touche s'assombrit brièvement, comme si elle s'enfonçait
+    this.tweens.killTweensOf(touche.ombre);
+    touche.ombre.setAlpha(0.45);
+    this.tweens.add({ targets: touche.ombre, alpha: 0, duration: 250 });
   }
 
   /*********************************************************************/
   /** PROJECTILES ET OBJETS
   /*********************************************************************/
+  // projectile : planche animée du personnage (clé de fa, clé de sol...)
+  // ou, à défaut, une note de musique à sa couleur
   creerNote(tireur) {
-    const note = this.groupe_notes.create(tireur.x + tireur.sens * 55, tireur.y - 30, "note_projectile");
+    const cle = tireur.perso.projectile || "note_projectile";
+    const note = this.groupe_notes.create(tireur.x + tireur.sens * 55, tireur.y - 30, cle);
     note.tireur = tireur;
-    note.setTint(tireur.perso.couleur).setFlipX(tireur.sens < 0).setDepth(12);
+    note.setFlipX(tireur.sens < 0).setDepth(12);
+    if (tireur.perso.projectile) {
+      note.play(cle + "_vol");
+      note.body.setSize(36, 46);
+    } else {
+      note.setTint(tireur.perso.couleur);
+      this.tweens.add({ targets: note, angle: { from: -15, to: 15 }, duration: 140, yoyo: true, repeat: -1 });
+    }
     note.setVelocityX(tireur.sens * tireur.perso.vitesseNote);
     note.setCollideWorldBounds(true);
     note.body.onWorldBounds = true;
-    this.tweens.add({ targets: note, angle: { from: -15, to: 15 }, duration: 140, yoyo: true, repeat: -1 });
     fct.jouerSon(this, "tir", 0.5);
   }
 
   toucherParNote(combattant, note) {
     if (note.tireur === combattant) return;
     const sens = note.body.velocity.x > 0 ? 1 : -1;
-    this.detruire(note);
+    this.dissiper(note);
     combattant.recevoirCoup(note.tireur, COUPS.note, sens);
   }
 
@@ -226,8 +322,18 @@ export default class combat extends Phaser.Scene {
   chocDeNotes(note1, note2) {
     if (note1.tireur === note2.tireur) return;
     fct.etincelles(this, (note1.x + note2.x) / 2, note1.y, 0xffffff, 5);
-    this.detruire(note1);
-    this.detruire(note2);
+    this.dissiper(note1);
+    this.dissiper(note2);
+  }
+
+  // détruit un projectile ; s'il est animé, on joue sa dissipation à sa place
+  dissiper(note) {
+    const cle = note.tireur.perso.projectile;
+    if (cle) {
+      const effet = this.add.sprite(note.x, note.y, cle).setFlipX(note.flipX).setDepth(12).play(cle + "_impact");
+      effet.once("animationcomplete", () => effet.destroy());
+    }
+    this.detruire(note);
   }
 
   // détruit un objet en arrêtant ses tweens (sinon ils tourneraient à vide)
@@ -264,16 +370,36 @@ export default class combat extends Phaser.Scene {
     this.detruire(objet);
   }
 
+  // "arrêt sur image" : la physique se fige un court instant pour donner du poids à un coup
+  // (pas pendant l'attaque spéciale, qui gère elle-même la pause de la physique)
+  arretSurImage(duree) {
+    if (this.qte) return;
+    this.physics.pause();
+    this.time.delayedCall(duree, () => {
+      if (!this.qte) this.physics.resume();
+    });
+  }
+
   /*********************************************************************/
   /** DÉROULEMENT D'UNE MANCHE
   /*********************************************************************/
+  // affiche une image de texte du jeu si elle existe ("texte_round_1"...), sinon un texte Phaser
+  annonce(cleImage, texteSecours, y = 300) {
+    const objet = this.textures.exists(cleImage)
+      ? this.add.image(640, y, cleImage)
+      : this.add.text(640, y, texteSecours, fct.style(80, "#ffd65a")).setOrigin(0.5);
+    return objet.setDepth(200);
+  }
+
   lancerIntro() {
-    const texte = this.add.text(640, 300, "Manche " + this.donnees.manche, fct.style(80, "#ffd65a")).setOrigin(0.5).setDepth(200).setScale(0);
+    const titre = this.annonce("texte_round_" + this.donnees.manche, "Manche " + this.donnees.manche).setScale(0);
     fct.jouerSon(this, "gong", 0.6);
-    this.tweens.add({ targets: texte, scale: 1, duration: 400, ease: "Back.easeOut" });
+    this.tweens.add({ targets: titre, scale: 1, duration: 400, ease: "Back.easeOut" });
+    const texte = this.add.text(640, 300, "En scène !", fct.style(80, "#ffd65a")).setOrigin(0.5).setDepth(200).setVisible(false);
 
     this.time.delayedCall(1300, () => {
-      texte.setText("En scène !");
+      titre.destroy();
+      texte.setVisible(true);
       this.combatFige = false;
       // chrono de la manche : un événement par seconde
       this.timerManche = this.time.addEvent({ delay: 1000, loop: true, callback: this.tic, callbackScope: this });
@@ -305,9 +431,8 @@ export default class combat extends Phaser.Scene {
     if (this.timerManche) this.timerManche.remove();
 
     const perdant = vainqueur ? vainqueur.adversaire : null;
-    let annonce = "Rideau !";
-    if (perdant && perdant.pv === 0) {
-      annonce = "K.O. !";
+    const ko = perdant !== null && perdant.pv === 0;
+    if (ko) {
       perdant.changerEtat("ko");
       fct.jouerSon(this, "ko", 0.8);
       this.cameras.main.flash(200, 255, 255, 255);
@@ -316,15 +441,20 @@ export default class combat extends Phaser.Scene {
     }
     if (vainqueur) this.donnees.victoires[vainqueur.numero - 1]++;
 
-    const texte = this.add.text(640, 280, annonce, fct.style(110, "#ffd65a")).setOrigin(0.5).setDepth(200).setScale(3).setAlpha(0);
-    this.tweens.add({ targets: texte, scale: 1, alpha: 1, duration: 350, ease: "Cubic.easeOut" });
+    // "K.O." (image pixel art agrandie) ou "Rideau !" quand le chrono est écoulé
+    const titre = ko ? this.annonce("texte_ko", "K.O. !", 280) : this.annonce("", "Rideau !", 280);
+    const echelle = ko ? 1.5 : 1;
+    titre.setScale(echelle * 3).setAlpha(0);
+    this.tweens.add({ targets: titre, scale: echelle, alpha: 1, duration: 350, ease: "Cubic.easeOut" });
 
     this.time.delayedCall(1400, () => {
+      titre.destroy();
       if (vainqueur) {
         vainqueur.changerEtat("victoire");
-        texte.setText(vainqueur.perso.nom + "\nremporte la manche !").setFontSize(56);
+        this.annonce("texte_joueur_" + vainqueur.numero, "Joueur " + vainqueur.numero, 260);
+        this.add.text(640, 330, vainqueur.perso.nom + " remporte la manche !", fct.style(40)).setOrigin(0.5).setDepth(200);
       } else {
-        texte.setText("Égalité !");
+        this.annonce("", "Égalité !", 280);
       }
     });
 
@@ -434,7 +564,10 @@ export default class combat extends Phaser.Scene {
 
     // salve de notes de l'attaquant vers le défenseur (tweens)
     for (let i = 0; i < 8; i++) {
-      const note = this.add.image(qte.attaquant.x, qte.attaquant.y - 30, "note_projectile").setTint(qte.attaquant.perso.couleur).setDepth(63);
+      const projectile = qte.attaquant.perso.projectile;
+      const note = projectile
+        ? this.add.image(qte.attaquant.x, qte.attaquant.y - 30, projectile, 0).setDepth(63)
+        : this.add.image(qte.attaquant.x, qte.attaquant.y - 30, "note_projectile").setTint(qte.attaquant.perso.couleur).setDepth(63);
       qte.elements.push(note);
       this.tweens.add({
         targets: note,
@@ -473,59 +606,96 @@ export default class combat extends Phaser.Scene {
   /** INTERFACE (barres de vie, chrono, jauges de notes, manches)
   /*********************************************************************/
   creerHUD() {
-    this.hud = this.add.graphics().setDepth(100);
-    this.add.text(40, 14, this.j1.perso.nom, fct.style(24, "#6cb8ff")).setDepth(101);
-    this.add.text(1240, 14, this.j2.perso.nom, fct.style(24, "#ff6c6c")).setOrigin(1, 0).setDepth(101);
+    // manches gagnées, de part et d'autre du chrono : elles ne changent pas pendant
+    // une manche, on les dessine donc une seule fois (et pas à chaque frame)
+    const hud = this.add.graphics().setDepth(100);
+    for (let j = 0; j < 2; j++) {
+      for (let k = 0; k < MANCHES_GAGNANTES; k++) {
+        const px = j === 0 ? 588 - k * 26 : 692 + k * 26;
+        hud.fillStyle(k < this.donnees.victoires[j] ? 0xffd65a : 0x3a2a30, 1).fillCircle(px, 46, 9);
+        hud.lineStyle(2, 0x1a0008).strokeCircle(px, 46, 9);
+      }
+    }
     this.texteChrono = this.add.text(640, 46, DUREE_MANCHE, fct.style(48, "#ffffff")).setOrigin(0.5).setDepth(101);
     this.add.text(640, 88, "Manche " + this.donnees.manche, fct.style(18, "#e8d8c0")).setOrigin(0.5).setDepth(101);
-    this.add.text(640, 706, "F / Échap : pause", fct.style(16, "#e8d8c0")).setOrigin(0.5).setAlpha(0.7).setDepth(101);
+    this.add.text(640, 706, "Start : pause", fct.style(16, "#e8d8c0")).setOrigin(0.5).setAlpha(0.7).setDepth(101);
+
+    this.barres = this.combattants.map((c) => {
+      // J1 en haut à gauche ; J2 en haut à droite, avec l'image en miroir
+      const j1 = c.numero === 1;
+      const x = j1 ? 14 : 1266;
+      const suffixe = j1 ? "" : "_j2";
+      const couleur = j1 ? "#6cb8ff" : "#ff6c6c";
+      const barre = {
+        vide: this.add.image(x, 4, "barre_vie_vide" + suffixe).setOrigin(j1 ? 0 : 1, 0).setDepth(100),
+        // la barre "fantôme" claire rattrape doucement la vraie vie
+        fantome: this.add.image(x, 4, "barre_vie_pleine" + suffixe).setOrigin(j1 ? 0 : 1, 0).setTintFill(0xfff0d0).setAlpha(0.7).setDepth(100),
+        pleine: this.add.image(x, 4, "barre_vie_pleine" + suffixe).setOrigin(j1 ? 0 : 1, 0).setDepth(101)
+      };
+      // "J1"/"J2" dans le losange, nom du personnage sous la barre
+      const losangeX = j1 ? x + 58 : x - 58;
+      this.add.text(losangeX, 62, "J" + c.numero, fct.style(26, couleur)).setOrigin(0.5).setDepth(102);
+      const joueur = (this.registry.get("joueurs") || [null, null])[c.numero - 1]; // compte connecté (null = invité)
+      const nom = joueur ? c.perso.nom + " (" + joueur.pseudo + ")" : c.perso.nom;
+      this.add.text(j1 ? x + 120 : x - 120, 100, nom, fct.style(20, couleur)).setOrigin(j1 ? 0 : 1, 0.5).setDepth(102);
+      return barre;
+    });
 
     // 5 notes de musique par joueur = jauge d'attaque spéciale
     this.notesHUD = this.combattants.map((c) => {
       const notes = [];
       for (let i = 0; i < 5; i++) {
-        const x = c.numero === 1 ? 54 + i * 34 : 1226 - i * 34;
-        notes.push(this.add.image(x, 102, "note_hud").setDepth(101));
+        const x = c.numero === 1 ? 140 + i * 44 : 1140 - i * 44;
+        notes.push({
+          vide: this.add.image(x, 142, "note_ult_vide").setDepth(101),
+          pleine: this.add.image(x, 142, "note_ult").setDepth(102)
+        });
       }
       return notes;
     });
   }
 
-  dessinerHUD(temps) {
-    const g = this.hud;
-    g.clear();
-    this.combattants.forEach((c, j) => {
-      // la barre "fantôme" blanche rattrape doucement la vraie vie
-      c.pvAffiches = Phaser.Math.Linear(c.pvAffiches, c.pv, 0.06);
-      const x = j === 0 ? 40 : 720;
-      const largeur = 520;
-      const ratio = c.pv / PV_MAX;
-      const ratioFantome = c.pvAffiches / PV_MAX;
-      g.fillStyle(0x1a0008, 0.85).fillRect(x - 4, 44, largeur + 8, 34);
-      g.fillStyle(0x5a1020, 1).fillRect(x, 48, largeur, 26);
-      // les barres se vident vers l'extérieur (ancrées côté chrono)
-      g.fillStyle(0xffffff, 0.8);
-      if (j === 0) g.fillRect(x + largeur * (1 - ratioFantome), 48, largeur * ratioFantome, 26);
-      else g.fillRect(x, 48, largeur * ratioFantome, 26);
-      g.fillStyle(ratio > 0.3 ? 0xf5c542 : 0xe0304e, 1);
-      if (j === 0) g.fillRect(x + largeur * (1 - ratio), 48, largeur * ratio, 26);
-      else g.fillRect(x, 48, largeur * ratio, 26);
+  // rogne l'image de la barre pleine selon le ratio de vie (0 à 1) ; la barre du J2
+  // est en miroir, on garde donc sa partie droite
+  rognerBarre(image, ratio, miroir) {
+    const largeur = BARRE_DEBUT + ratio * (BARRE_FIN - BARRE_DEBUT);
+    image.setCrop(miroir ? image.width - largeur : 0, 0, largeur, image.height);
+  }
 
-      // manches gagnées
-      for (let k = 0; k < MANCHES_GAGNANTES; k++) {
-        const px = j === 0 ? 540 - k * 28 : 740 + k * 28;
-        g.fillStyle(k < this.donnees.victoires[j] ? 0xffd65a : 0x3a2a30, 1).fillCircle(px, 98, 9);
-        g.lineStyle(2, 0x1a0008).strokeCircle(px, 98, 9);
+  // Appelée à chaque frame : pour ménager le processeur de la borne, on ne touche
+  // aux images que lorsque la valeur affichée a changé depuis la frame précédente.
+  dessinerHUD(temps) {
+    this.combattants.forEach((c, j) => {
+      const barre = this.barres[j];
+      // la barre "fantôme" rattrape la vraie vie, puis s'arrête dessus
+      c.pvAffiches = Math.abs(c.pvAffiches - c.pv) < 0.1 ? c.pv : Phaser.Math.Linear(c.pvAffiches, c.pv, 0.06);
+      if (barre.pv !== c.pv) {
+        barre.pv = c.pv;
+        this.rognerBarre(barre.pleine, c.pv / PV_MAX, j === 1);
+      }
+      if (barre.pvAffiches !== c.pvAffiches) {
+        barre.pvAffiches = c.pvAffiches;
+        this.rognerBarre(barre.fantome, c.pvAffiches / PV_MAX, j === 1);
       }
 
       // notes de la jauge : pleines, en cours de remplissage ou vides
       const pleine = c.energie >= ENERGIE_MAX;
-      this.notesHUD[j].forEach((note, k) => {
-        const remplissage = Phaser.Math.Clamp(c.energie / 20 - k, 0, 1);
-        note.setTint(remplissage >= 1 ? c.perso.couleur : 0xffffff);
-        note.setAlpha(0.2 + 0.8 * remplissage);
-        note.setScale(pleine ? 1 + 0.18 * Math.sin(temps / 90 + k) : 1);
-      });
+      if (barre.energie !== c.energie) {
+        barre.energie = c.energie;
+        this.notesHUD[j].forEach((note, k) => {
+          const remplissage = Phaser.Math.Clamp(c.energie / 20 - k, 0, 1);
+          note.pleine.setAlpha(remplissage >= 1 ? 1 : remplissage * 0.6).setScale(1);
+          note.vide.setScale(1);
+        });
+      }
+      // jauge pleine : les notes pulsent
+      if (pleine) {
+        this.notesHUD[j].forEach((note, k) => {
+          const echelle = 1 + 0.15 * Math.sin(temps / 90 + k);
+          note.pleine.setScale(echelle);
+          note.vide.setScale(echelle);
+        });
+      }
     });
   }
 }

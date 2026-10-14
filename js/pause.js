@@ -5,7 +5,7 @@ import { creerTouchesDeuxJoueurs } from "./controles.js";
 /** MENU PAUSE
 /** Lancé PAR-DESSUS la scène de combat (scene.launch), qui est mise
 /** en pause : physique, timers, tweens et animations sont figés.
-/** Ouverture / fermeture : touche Échap ou bouton F de n'importe quel joueur.
+/** Ouverture / fermeture : bouton Start de n'importe quel joueur (ou Échap).
 /***********************************************************************/
 
 export default class pause extends Phaser.Scene {
@@ -21,7 +21,7 @@ export default class pause extends Phaser.Scene {
     this.enTransition = false;
     this.add.rectangle(640, 360, 1280, 720, 0x000000, 0.7);
     this.add.rectangle(640, 380, 560, 470, 0x12040a, 0.92).setStrokeStyle(4, 0xf5c542);
-    this.add.text(640, 195, "Entracte", fct.style(64, "#ffd65a")).setOrigin(0.5);
+    this.add.image(640, 200, "titre_entracte").setScale(0.85);
 
     this.menu = fct.creerMenu(this, [
       { texte: "Reprendre", action: "reprendre" },
@@ -29,10 +29,9 @@ export default class pause extends Phaser.Scene {
       { texte: "Recommencer le duel", action: "recommencer" },
       { texte: "Changer d'artistes", action: "selection" },
       { texte: "Menu principal", action: "menu" }
-    ], 640, 285, 64);
-    this.menu.textes.forEach((t) => t.setFontSize(34));
+    ], 640, 285, 64, 34);
 
-    this.add.text(640, 655, "A : valider     B / F / Échap : reprendre", fct.style(22, "#e8d8c0")).setOrigin(0.5);
+    this.add.text(640, 655, "A : valider     B / Start : reprendre", fct.style(22, "#e8d8c0")).setOrigin(0.5);
 
     this.touches = creerTouchesDeuxJoueurs(this);
     this.toucheEchap = this.input.keyboard.addKey("ESC");
@@ -46,9 +45,9 @@ export default class pause extends Phaser.Scene {
   update() {
     if (this.enTransition) return;
 
-    // F ou Échap referment la pause (à lire avant lireMenu qui "consomme" les appuis)
+    // Start ou Échap referment la pause (à lire avant lireMenu qui "consomme" les appuis)
     const fermer = Phaser.Input.Keyboard.JustDown(this.toucheEchap) ||
-      this.touches.some((touches) => Phaser.Input.Keyboard.JustDown(touches.F));
+      this.touches.some((touches) => Phaser.Input.Keyboard.JustDown(touches.start));
     if (fermer) {
       this.reprendre();
       return;
@@ -88,15 +87,21 @@ export default class pause extends Phaser.Scene {
     this.scene.stop();
   }
 
-  // arrête le combat (et ses sons) puis lance une autre scène après un fondu
+  // arrête le combat (et ses sons) puis lance une autre scène :
+  // rideau qui se ferme pour le menu principal, simple fondu sinon
   quitterCombat(cle, donnees) {
-    this.enTransition = true;
-    this.cameras.main.fadeOut(300, 0, 0, 0);
-    this.cameras.main.once("camerafadeoutcomplete", () => {
+    const suite = () => {
       this.sound.stopAll();
       fct.arreterMusique(this);
       this.scene.stop("combat");
       this.scene.start(cle, donnees);
-    });
+    };
+    if (cle === "menu") {
+      fct.transitionRideau(this, "rideau_fermeture", suite);
+      return;
+    }
+    this.enTransition = true;
+    this.cameras.main.fadeOut(300, 0, 0, 0);
+    this.cameras.main.once("camerafadeoutcomplete", suite);
   }
 }

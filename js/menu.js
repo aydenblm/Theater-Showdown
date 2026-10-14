@@ -3,7 +3,16 @@ import { creerTouchesDeuxJoueurs } from "./controles.js";
 
 /***********************************************************************/
 /** MENU PRINCIPAL : choix du mode de jeu
+/** Trois boutons côte à côte : le bouton choisi est en couleur,
+/** les autres en version "sombre".
 /***********************************************************************/
+
+// rideau : la scène suivante s'ouvre avec l'animation du rideau de théâtre
+const BOUTONS = [
+  { cle: "bouton_solo", actif: true, scene: "solo", rideau: true },
+  { cle: "bouton_multi", actif: true, scene: "connexion", rideau: true },
+  { cle: "bouton_commandes", actif: true, scene: "commandes" }
+];
 
 export default class menu extends Phaser.Scene {
   constructor() {
@@ -16,36 +25,61 @@ export default class menu extends Phaser.Scene {
     fct.jouerMusique(this, "musique_menu");
 
     this.add.image(640, 360, "fond_menu");
+    const logo = this.add.image(640, 230, "logo").setScale(0.85);
+    this.tweens.add({ targets: logo, scale: 0.88, duration: 1100, yoyo: true, repeat: -1, ease: "Sine.easeInOut" });
 
-    // titre qui "respire"
-    const titre1 = this.add.text(640, 130, "THEATER", fct.style(96, "#ffd65a")).setOrigin(0.5);
-    const titre2 = this.add.text(640, 225, "SHOWDOWN", fct.style(96, "#ffd65a")).setOrigin(0.5);
-    this.tweens.add({ targets: [titre1, titre2], scale: 1.04, duration: 900, yoyo: true, repeat: -1, ease: "Sine.easeInOut" });
-    this.add.text(640, 300, "Le grand duel musical", fct.style(28)).setOrigin(0.5);
+    this.boutons = BOUTONS.map((bouton, i) => this.add.image(330 + i * 310, 520, bouton.cle + "_sombre"));
+    this.index = 1; // "Multi-joueur" présélectionné
+    this.majBoutons();
 
-    this.menu = fct.creerMenu(this, [
-      { texte: "Duel 1 contre 1", actif: true, scene: "selection" },
-      { texte: "Mode Histoire", actif: false },
-      { texte: "Commandes", actif: true, scene: "commandes" }
-    ], 640, 420, 75);
-
-    this.message = this.add.text(640, 610, "", fct.style(24, "#ff9aa8")).setOrigin(0.5);
-    this.add.text(640, 680, "Joystick : choisir      Bouton A : valider", fct.style(22, "#e8d8c0")).setOrigin(0.5);
+    this.message = this.add.text(640, 630, "", fct.style(24, "#ffd65a")).setOrigin(0.5);
+    this.add.text(640, 690, "Joystick : choisir      Bouton A : valider", fct.style(20, "#e8d8c0")).setOrigin(0.5);
 
     this.touches = creerTouchesDeuxJoueurs(this);
   }
 
-  update() {
-    const choix = fct.lireMenu(this, this.menu, this.touches);
-    if (!choix || choix === "retour") return;
+  majBoutons() {
+    this.boutons.forEach((image, i) => {
+      const choisi = i === this.index;
+      image.setTexture(BOUTONS[i].cle + (choisi ? "" : "_sombre"));
+      this.tweens.killTweensOf(image);
+      image.setScale(choisi ? 1.05 : 0.92).setTint(choisi ? 0xffffff : 0xb0a0a0);
+      if (choisi) this.tweens.add({ targets: image, scale: 1.1, duration: 500, yoyo: true, repeat: -1, ease: "Sine.easeInOut" });
+    });
+  }
 
-    if (choix.actif === false) {
+  update() {
+    if (this.enTransition) return;
+    for (const touches of this.touches) {
+      const appuis = fct.lireAppuis(touches);
+      // joystick gauche/droite (ou haut/bas) pour changer de bouton
+      const deplacement = (appuis.droite || appuis.bas ? 1 : 0) - (appuis.gauche || appuis.haut ? 1 : 0);
+      if (deplacement !== 0) {
+        this.index = fct.boucler(this.index + deplacement, BOUTONS.length);
+        this.message.setText("");
+        fct.jouerSon(this, "menu_deplacer", 0.5);
+        this.majBoutons();
+      }
+      if (appuis.A) {
+        this.valider(BOUTONS[this.index]);
+        return;
+      }
+    }
+  }
+
+  valider(bouton) {
+    if (!bouton.actif) {
       fct.jouerSon(this, "qte_rate", 0.5);
-      this.message.setText("Bientôt disponible : répétitions en cours !");
+      this.message.setText("Mode solo bientôt disponible : répétitions en cours !");
       this.cameras.main.shake(120, 0.004);
       return;
     }
     fct.jouerSon(this, "menu_valider");
-    fct.changerScene(this, choix.scene);
+    if (bouton.rideau) {
+      // le rideau s'ouvre sur la scène du théâtre
+      fct.transitionRideau(this, "rideau_ouverture", () => this.scene.start(bouton.scene));
+    } else {
+      fct.changerScene(this, bouton.scene);
+    }
   }
 }

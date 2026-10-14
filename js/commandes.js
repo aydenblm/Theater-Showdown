@@ -12,6 +12,11 @@ export default class commandes extends Phaser.Scene {
     super({ key: "commandes" });
   }
 
+  // depuisPause : écran ouvert depuis le menu pause (on y retourne au lieu du menu principal)
+  init(donnees) {
+    this.depuisPause = donnees !== undefined && donnees.depuisPause === true;
+  }
+
   create() {
     this.enTransition = false;
     this.cameras.main.fadeIn(300);
@@ -31,7 +36,12 @@ export default class commandes extends Phaser.Scene {
   retourMenu() {
     if (this.enTransition) return;
     fct.jouerSon(this, "menu_valider");
-    fct.changerScene(this, "menu");
+    if (this.depuisPause) {
+      this.scene.resume("pause");
+      this.scene.stop();
+    } else {
+      fct.changerScene(this, "menu");
+    }
   }
 
   update() {

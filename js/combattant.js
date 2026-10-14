@@ -7,7 +7,7 @@ import * as fct from "./fonctions.js";
 /**
 /** États possibles (this.etat) :
 /**   "libre"    : peut se déplacer, sauter, attaquer
-/**   "garde"    : accroupi, bloque 80% des dégâts
+/**   "garde"    : bouton A maintenu, bloque 80% des dégâts (60% d'une attaque puissante)
 /**   "attaque"  : en train de frapper / tirer (ne peut rien faire d'autre)
 /**   "touche"   : vient d'être frappé, étourdi un court instant
 /**   "esquive"  : dash rapide, invincible
@@ -21,9 +21,12 @@ export const ENERGIE_MAX = 100; // la jauge contient 5 notes de 20 points
 // demarrage : délai avant que le coup ne touche     duree : temps total pendant lequel on est bloqué
 // portee : longueur de la zone de frappe devant le personnage     elan : petit pas en avant en frappant
 // recul / reculY : vitesse donnée à l'adversaire touché   etourdissement : durée de l'état "touche"
+// lourd : préparation visible (le perso s'illumine), arrêt sur image à l'impact, traverse en partie la garde
 export const COUPS = {
-  legere: { anim: "legere", demarrage: 90, duree: 260, degats: 5, portee: 95, elan: 140, recul: 60, reculY: 0, etourdissement: 300, energie: 9 },
-  lourde: { anim: "lourde", demarrage: 230, duree: 560, degats: 11, portee: 115, elan: 180, recul: 480, reculY: 280, etourdissement: 480, energie: 14 },
+  // rapide : part tout de suite, petits dégâts, presque pas de recul : idéal pour enchaîner les combos
+  legere: { anim: "legere", demarrage: 70, duree: 220, degats: 4, portee: 90, elan: 120, recul: 40, reculY: 0, etourdissement: 260, energie: 8 },
+  // puissante : lente et risquée (on peut être interrompu pendant la préparation), mais elle projette l'adversaire
+  lourde: { anim: "lourde", demarrage: 320, duree: 700, degats: 15, portee: 125, elan: 260, recul: 650, reculY: 380, etourdissement: 650, energie: 16, lourd: true },
   note: { degats: 6, recul: 220, reculY: 80, etourdissement: 300, energie: 7 }
 };
 
@@ -37,8 +40,15 @@ export default class Combattant extends Phaser.Physics.Arcade.Sprite {
     scene.add.existing(this);
     scene.physics.add.existing(this);
 
-    // hitbox plus fine que l'image (120x180)
-    this.body.setSize(44, 138).setOffset(38, 40);
+    // agrandissement propre à la planche (les persos pixel art sont dessinés en 128x128)
+    const sprite = perso.sprite;
+    this.setScale(sprite.echelle);
+    // hitbox de 44x138 pixels à l'écran, centrée, pieds en bas de la frame
+    // (setSize et setOffset s'expriment en pixels de la planche, avant agrandissement)
+    const largeurCorps = 44 / sprite.echelle;
+    const hauteurCorps = 138 / sprite.echelle;
+    this.body.setSize(largeurCorps, hauteurCorps, false);
+    this.body.setOffset((sprite.largeur - largeurCorps) / 2, sprite.hauteur - hauteurCorps - 2 / sprite.echelle);
     this.setCollideWorldBounds(true);
     this.setDepth(10);
 
@@ -59,6 +69,9 @@ export default class Combattant extends Phaser.Physics.Arcade.Sprite {
     this.dernierCoupPorte = 0;
     this.bonusVitesse = 1;
     this.bonusForce = 1;
+    this.echelleTextes = 1; // les textes flottants (combo, "Esquivé !"...) suivent la taille du personnage
+    this.plateforme = null; // plateforme sur laquelle il se tient (null au sol ou en l'air)
+    this.traverseeJusqua = 0; // pendant la descente d'une plateforme, on la traverse
 
     // étiquette "J1"/"J2" au-dessus de la tête + icônes des bonus actifs
     const couleur = numero === 1 ? "#6cb8ff" : "#ff6c6c";
@@ -73,6 +86,17 @@ export default class Combattant extends Phaser.Physics.Arcade.Sprite {
 
   get auSol() {
     return this.body.blocked.down || this.body.touching.down;
+  }
+
+  // la jauge se remplit plus vite en combo
+  get bonusCombo() {
+    return 1 + 0.25 * Math.max(0, this.combo - 1);
+  }
+
+  // petit texte qui s'envole au-dessus du personnage (hauteur et taille suivent echelleTextes)
+  annoncer(texte, couleur, hauteur, taille = 26) {
+    const e = this.echelleTextes;
+    fct.texteFlottant(this.scene, this.x, this.y - hauteur * e, texte, couleur, Math.round(taille * e));
   }
 
   /*********************************************************************/
@@ -107,8 +131,11 @@ export default class Combattant extends Phaser.Physics.Arcade.Sprite {
     }
     if (this.etat === "esquive") return;
 
-    // garde (joystick bas, au sol)
-    if (this.touches.bas.isDown && this.auSol) {
+    // Boutons en combat :  A = garde (maintenu)   B = attaque puissante   C = esquive
+    //                       D = attaque spéciale    E = attaque rapide      F = lancer une note
+
+    // garde (bouton A maintenu, au sol)
+    if (this.touches.A.isDown && this.auSol) {
       this.etat = "garde";
       this.setVelocityX(0);
       this.majAnimation();
@@ -116,12 +143,15 @@ export default class Combattant extends Phaser.Physics.Arcade.Sprite {
     }
     if (this.etat === "garde") this.etat = "libre";
 
+    // joystick bas sur une plateforme : on se laisse tomber à travers
+    if (appuis.bas && this.plateforme) this.descendrePlateforme();
+
     // attaques
     if (appuis.D && this.energie >= ENERGIE_MAX) {
       this.scene.lancerSpecial(this);
       return;
     }
-    if (appuis.A) {
+    if (appuis.E) {
       this.attaquer(COUPS.legere);
       return;
     }
@@ -129,11 +159,11 @@ export default class Combattant extends Phaser.Physics.Arcade.Sprite {
       this.attaquer(COUPS.lourde);
       return;
     }
-    if (appuis.C && temps >= this.prochainTir) {
+    if (appuis.F && temps >= this.prochainTir) {
       this.tirer(temps);
       return;
     }
-    if (appuis.E && temps >= this.prochaineEsquive) {
+    if (appuis.C && temps >= this.prochaineEsquive) {
       this.esquiver(temps);
       return;
     }
@@ -155,6 +185,7 @@ export default class Combattant extends Phaser.Physics.Arcade.Sprite {
   // Tout timer en cours est annulé : un coup reçu interrompt donc une attaque.
   changerEtat(etat, duree = 0) {
     this.etat = etat;
+    this.clearTint(); // une attaque puissante interrompue ne doit pas rester illuminée
     if (this.timerEtat) this.timerEtat.remove();
     if (this.timerImpact) this.timerImpact.remove();
     this.timerEtat = null;
@@ -183,9 +214,10 @@ export default class Combattant extends Phaser.Physics.Arcade.Sprite {
   }
 
   majEtiquettes() {
-    this.etiquette.setPosition(this.x, this.y - 112);
-    this.iconeVitesse.setPosition(this.x - 32, this.y - 112).setVisible(this.bonusVitesse > 1);
-    this.iconeForce.setPosition(this.x + 32, this.y - 112).setVisible(this.bonusForce > 1);
+    const haut = this.y - this.displayHeight / 2 - 22; // juste au-dessus de la tête
+    this.etiquette.setPosition(this.x, haut);
+    this.iconeVitesse.setPosition(this.x - 32, haut).setVisible(this.bonusVitesse > 1);
+    this.iconeForce.setPosition(this.x + 32, haut).setVisible(this.bonusForce > 1);
   }
 
   /*********************************************************************/
@@ -193,15 +225,27 @@ export default class Combattant extends Phaser.Physics.Arcade.Sprite {
   /*********************************************************************/
   attaquer(coup) {
     this.changerEtat("attaque", coup.duree);
-    if (this.auSol) this.setVelocityX(this.sens * coup.elan);
     this.anims.play(this.perso.id + "_" + coup.anim);
-    fct.jouerSon(this.scene, "esquive", 0.25); // petit "whoosh"
+    if (coup.lourd) {
+      // préparation : on s'immobilise et on se charge de lumière dorée
+      if (this.auSol) this.setVelocityX(0);
+      this.setTint(0xffc060);
+    } else {
+      if (this.auSol) this.setVelocityX(this.sens * coup.elan);
+      fct.jouerSon(this.scene, "esquive", 0.25); // petit "whoosh"
+    }
     // le coup ne touche qu'après son temps de démarrage
     this.timerImpact = this.scene.time.delayedCall(coup.demarrage, () => this.verifierImpact(coup));
   }
 
   verifierImpact(coup) {
     this.timerImpact = null;
+    if (coup.lourd) {
+      // fin de la préparation : on bondit en avant avec un "whoosh" grave
+      this.clearTint();
+      if (this.auSol) this.setVelocityX(this.sens * coup.elan);
+      this.scene.sound.play("esquive", { volume: 0.5, rate: 0.6 });
+    }
     const cible = this.adversaire;
     // zone de frappe : un rectangle devant le personnage, à hauteur du buste
     const zone = new Phaser.Geom.Rectangle(this.sens > 0 ? this.x : this.x - coup.portee, this.y - 75, coup.portee, 105);
@@ -220,6 +264,13 @@ export default class Combattant extends Phaser.Physics.Arcade.Sprite {
       this.timerImpact = null;
       this.scene.creerNote(this);
     });
+  }
+
+  // traverse la plateforme sous ses pieds (la scène ignore la collision pendant un court instant)
+  descendrePlateforme() {
+    this.plateforme = null;
+    this.traverseeJusqua = this.scene.time.now + 250;
+    this.setVelocityY(120);
   }
 
   esquiver(temps) {
@@ -242,7 +293,7 @@ export default class Combattant extends Phaser.Physics.Arcade.Sprite {
   recevoirCoup(attaquant, coup, sens, imparable = false) {
     if (this.etat === "ko" || this.scene.mancheTerminee) return false;
     if (this.etat === "esquive") {
-      fct.texteFlottant(this.scene, this.x, this.y - 100, "Esquivé !", "#9fe8ff");
+      this.annoncer("Esquivé !", "#9fe8ff", 100);
       return false;
     }
 
@@ -250,7 +301,8 @@ export default class Combattant extends Phaser.Physics.Arcade.Sprite {
     const enGarde = this.etat === "garde" && !imparable;
 
     if (enGarde) {
-      degats *= 0.2;
+      // la garde bloque 80 % d'un coup normal, mais seulement 60 % d'une attaque puissante
+      degats *= coup.lourd ? 0.4 : 0.2;
       this.setVelocityX(sens * coup.recul * 0.4);
       fct.jouerSon(this.scene, "garde", 0.5);
       fct.etincelles(this.scene, this.x - sens * 20, this.y - 20, 0x9fd8ff, 3);
@@ -263,16 +315,22 @@ export default class Combattant extends Phaser.Physics.Arcade.Sprite {
       this.setTintFill(0xffffff);
       this.scene.time.delayedCall(70, () => this.clearTint());
       fct.jouerSon(this.scene, degats >= 10 ? "coup_lourd" : "coup_leger", 0.7);
-      fct.etincelles(this.scene, this.x - sens * 10, this.y - 30, attaquant.perso.couleur, degats >= 10 ? 7 : 4);
-      this.scene.cameras.main.shake(degats >= 10 ? 150 : 70, degats >= 10 ? 0.008 : 0.003);
+      if (coup.lourd) {
+        // impact puissant : arrêt sur image, grosse gerbe d'étincelles, écran qui tremble fort
+        this.scene.arretSurImage(90);
+        fct.etincelles(this.scene, this.x - sens * 10, this.y - 30, attaquant.perso.couleur, 10);
+        this.scene.cameras.main.shake(220, 0.012);
+      } else {
+        fct.etincelles(this.scene, this.x - sens * 10, this.y - 30, attaquant.perso.couleur, degats >= 10 ? 7 : 3);
+        this.scene.cameras.main.shake(degats >= 10 ? 150 : 60, degats >= 10 ? 0.008 : 0.002);
+      }
     }
 
     degats = Math.max(1, Math.round(degats));
     this.pv = Math.max(0, this.pv - degats);
 
     // la jauge se remplit plus vite en combo ; on en gagne aussi un peu en encaissant
-    const bonusCombo = 1 + 0.25 * Math.max(0, attaquant.combo - 1);
-    attaquant.gagnerEnergie(enGarde ? coup.energie / 3 : coup.energie * bonusCombo);
+    attaquant.gagnerEnergie(enGarde ? coup.energie / 3 : coup.energie * attaquant.bonusCombo);
     this.gagnerEnergie(4);
 
     if (this.pv === 0) this.scene.finDeManche(attaquant);
@@ -284,7 +342,7 @@ export default class Combattant extends Phaser.Physics.Arcade.Sprite {
     this.combo = maintenant - this.dernierCoupPorte < DELAI_COMBO ? this.combo + 1 : 1;
     this.dernierCoupPorte = maintenant;
     if (this.combo >= 2) {
-      fct.texteFlottant(this.scene, this.x, this.y - 140, this.combo + " coups !", fct.couleurTexte(this.perso.couleur), 20 + this.combo * 4);
+      this.annoncer(this.combo + " coups !", fct.couleurTexte(this.perso.couleur), 140, 20 + this.combo * 4);
     }
   }
 
@@ -293,7 +351,7 @@ export default class Combattant extends Phaser.Physics.Arcade.Sprite {
     this.energie = Math.min(ENERGIE_MAX, this.energie + quantite);
     if (this.energie >= ENERGIE_MAX) {
       fct.jouerSon(this.scene, "jauge_pleine", 0.6);
-      fct.texteFlottant(this.scene, this.x, this.y - 130, "Spécial prêt ! (D)", "#ffd65a");
+      this.annoncer("Spécial prêt ! (D)", "#ffd65a", 130);
     }
   }
 
@@ -311,7 +369,7 @@ export default class Combattant extends Phaser.Physics.Arcade.Sprite {
         break;
     }
     fct.jouerSon(this.scene, "bonus", 0.6);
-    fct.texteFlottant(this.scene, this.x, this.y - 120, objet.texte, "#7dff9a");
+    this.annoncer(objet.texte, "#7dff9a", 120);
   }
 
   appliquerBonus(type, valeur, duree) {

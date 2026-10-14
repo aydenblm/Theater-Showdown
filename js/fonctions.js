@@ -55,20 +55,39 @@ export function jouerSon(scene, cle, volume = 0.6) {
   scene.sound.play(cle, { volume: volume });
 }
 
+// Les musiques durent plusieurs minutes : Phaser les décompresserait entièrement en mémoire
+// (plus de 100 Mo pour une seule piste), ce que le Raspberry Pi de la borne ne supporte pas.
+// On les lit donc "en flux" avec une balise audio HTML, qui ne charge que ce qu'elle joue.
 // La musique est partagée entre les scènes : on la garde dans le registre du jeu
 // pour ne pas la relancer à chaque changement de scène.
 export function jouerMusique(scene, cle, volume = 0.45) {
   const actuelle = scene.registry.get("musique");
-  if (actuelle && actuelle.key === cle && actuelle.isPlaying) return;
+  if (actuelle && actuelle.cle === cle && !actuelle.audio.paused) return;
   arreterMusique(scene);
-  const musique = scene.sound.add(cle, { loop: true, volume: volume });
-  musique.play();
-  scene.registry.set("musique", musique);
+
+  const audio = new Audio("./assets/sons/" + cle + ".mp3");
+  audio.loop = true;
+  audio.volume = volume;
+  scene.registry.set("musique", { cle: cle, audio: audio });
+
+  // Un navigateur refuse parfois de lancer un son avant le premier appui sur une touche :
+  // dans ce cas, on réessaie dès que le joueur appuie sur quelque chose.
+  audio.play().catch(() => {
+    const reessayer = () => {
+      window.removeEventListener("keydown", reessayer);
+      if (scene.registry.get("musique") && scene.registry.get("musique").audio === audio) audio.play().catch(() => {});
+    };
+    window.addEventListener("keydown", reessayer);
+  });
 }
 
 export function arreterMusique(scene) {
   const actuelle = scene.registry.get("musique");
-  if (actuelle) actuelle.destroy();
+  if (actuelle) {
+    actuelle.audio.pause();
+    actuelle.audio.removeAttribute("src"); // libère le fichier
+    actuelle.audio.load();
+  }
   scene.registry.set("musique", null);
 }
 
@@ -114,16 +133,35 @@ export function changerScene(scene, cle, donnees) {
   scene.cameras.main.once("camerafadeoutcomplete", () => scene.scene.start(cle, donnees));
 }
 
+// Joue l'animation du rideau ("rideau_ouverture" ou "rideau_fermeture") par-dessus la scène,
+// puis exécute "suite" (en général le lancement d'une autre scène).
+export function transitionRideau(scene, video, suite) {
+  if (scene.enTransition) return;
+  scene.enTransition = true;
+  let terminee = false;
+  const terminer = () => {
+    if (terminee) return;
+    terminee = true;
+    suite();
+  };
+  // vidéo encodée en 640x360 (plus légère pour le Pi 3), agrandie x2 pour couvrir l'écran
+  const rideau = scene.add.video(640, 360, video).setScale(2).setDepth(1000);
+  rideau.once("complete", terminer);
+  scene.time.delayedCall(1600, terminer); // sécurité si la vidéo ne peut pas être lue
+  rideau.play();
+}
+
 /***********************************************************************/
 /** MENU VERTICAL piloté au joystick (menu principal, écran de victoire)
 /***********************************************************************/
 
 // options : [{ texte: "...", actif: true/false, ... }]
-export function creerMenu(scene, options, x, y, ecart) {
+// (la taille est donnée dès la création : changer la police ensuite redessine chaque texte)
+export function creerMenu(scene, options, x, y, ecart, taille = 40) {
   const menu = { index: 0, options: options, textes: [] };
   options.forEach((option, i) => {
     const couleur = option.actif === false ? "#8a7f86" : "#ffffff";
-    menu.textes.push(scene.add.text(x, y + i * ecart, option.texte, style(40, couleur)).setOrigin(0.5).setDepth(20));
+    menu.textes.push(scene.add.text(x, y + i * ecart, option.texte, style(taille, couleur)).setOrigin(0.5).setDepth(20));
   });
   menu.curseurGauche = scene.add.image(0, 0, "note_hud").setTint(0xf5c542).setScale(1.3).setDepth(20);
   menu.curseurDroit = scene.add.image(0, 0, "note_hud").setTint(0xf5c542).setScale(1.3).setDepth(20).setFlipX(true);
